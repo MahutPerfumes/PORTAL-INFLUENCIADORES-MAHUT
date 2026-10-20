@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-from urllib.parse import urlencode, urlsplit, parse_qs
 
 st.set_page_config(page_title='Portal do Influenciador | MAHUT', page_icon='✨', layout='wide')
 st.markdown('''<style>
@@ -97,7 +96,7 @@ elif st.session_state.ma_session is None:
                 except requests.RequestException:
                     st.error('Serviço indisponível. Tente novamente.')
     with aba_recuperar:
-        st.write('Informe o e-mail cadastrado para receber um link de criação ou recuperação de senha.')
+        st.write('Informe o e-mail de uma conta já criada no Supabase para solicitar a recuperação de senha. O cadastro no BI, sozinho, não cria essa conta.')
         with st.form('recuperar'):
             email_recuperar = st.text_input('E-mail cadastrado').strip()
             enviar = st.form_submit_button('Enviar link')
@@ -110,7 +109,14 @@ elif st.session_state.ma_session is None:
                     if r.ok:
                         st.success('Se o e-mail estiver cadastrado, você receberá um link. Confira também o spam.')
                     else:
-                        st.error('Não foi possível solicitar o link. Verifique a configuração de URLs do Supabase.')
+                        if r.status_code == 429:
+                            st.error('Limite temporário de envios do Supabase atingido. Aguarde e tente novamente.')
+                        elif r.status_code in (400, 422):
+                            st.error('O Supabase recusou a solicitação. Verifique a URL de redirecionamento e as configurações de autenticação.')
+                        elif r.status_code >= 500:
+                            st.error('O serviço de e-mail/autenticação está indisponível. Confira os logs do Supabase.')
+                        else:
+                            st.error(f'Não foi possível enviar o link (código HTTP {r.status_code}). Confira os logs de autenticação no Supabase.')
                 except requests.RequestException:
                     st.error('Falha de conexão. Tente novamente.')
 else:
