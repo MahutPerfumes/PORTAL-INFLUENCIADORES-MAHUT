@@ -72,7 +72,7 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
 .ma-logo {font-family: Georgia,serif;font-size:clamp(28px,5vw,38px);letter-spacing:6px;color:#e4c18a!important}
 .ma-small {color:#e3d0b4!important;letter-spacing:2px;font-size:11px}
 .ma-title {font-size:clamp(21px,4vw,30px);font-weight:600;color:#fff!important;margin-top:20px}
-.ma-subtitle {color:#f4e5c4!important}
+.ma-subtitle, .ma-header .ma-subtitle {color:#f4e5c4!important; opacity:1!important}
 @media(max-width:640px) {
   [data-testid="stMainBlockContainer"] {padding-left: 1rem; padding-right: 1rem;}
   .ma-header {border-radius: 12px;}
@@ -103,8 +103,11 @@ if 'ma_recovery_token' not in st.session_state:
 def auth_request(method, endpoint, **kwargs):
     return requests.request(method, f'{supabase_url}/auth/v1/{endpoint}', headers=HEADERS, timeout=15, **kwargs)
 
-# Recovery links must use token_hash in the URL query string.
-# Supabase email template: {{ .SiteURL }}?token_hash={{ .TokenHash }}&type=recovery
+# IMPORTANT: Configure Supabase Auth email templates (Invite user and Reset password)
+# with token_hash query links, not default ConfirmationURL fragment redirects.
+# Invite: {{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=invite
+# Recovery: {{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=recovery
+# Streamlit's st.query_params cannot read URL fragments (#access_token=...).
 params = st.query_params
 token_hash = params.get('token_hash')
 link_type = params.get('type')
@@ -114,11 +117,16 @@ if token_hash and link_type in ('recovery', 'invite', 'signup') and not st.sessi
         if r.ok and r.json().get('access_token'):
             st.session_state.ma_recovery_token = r.json()['access_token']
             st.query_params.clear()
+            st.rerun()
         else:
             st.error('Link inválido ou expirado. Solicite outro link.')
             st.query_params.clear()
     except requests.RequestException:
         st.warning('Não foi possível verificar o link. Tente novamente.')
+
+if params.get('error') or params.get('error_description'):
+    st.error('O link de acesso foi recusado ou expirou. Solicite um novo e-mail.')
+    st.query_params.clear()
 
 st.info('Ambiente de testes. Vendas e comissões reais permanecem bloqueadas até a validação do acesso individual.')
 
