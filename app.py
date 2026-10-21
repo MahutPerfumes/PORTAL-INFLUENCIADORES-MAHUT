@@ -103,29 +103,46 @@ if 'ma_recovery_token' not in st.session_state:
 def auth_request(method, endpoint, **kwargs):
     return requests.request(method, f'{supabase_url}/auth/v1/{endpoint}', headers=HEADERS, timeout=15, **kwargs)
 
-# IMPORTANT: Configure Supabase Auth email templates (Invite user and Reset password)
-# with token_hash query links, not default ConfirmationURL fragment redirects.
-# Invite: {{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=invite
-# Recovery: {{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=recovery
-# Streamlit's st.query_params cannot read URL fragments (#access_token=...).
+# O link padrão do Supabase pode trazer credenciais no fragmento (#),
+# que o Streamlit não consegue ler. Como alternativa, o influenciador
+# copia o endereço ORIGINAL do botão do e-mail e cola no formulário abaixo.
+from urllib.parse import urlparse, parse_qs
+
+
+def verificar_link_copiado(link):
+    """Aceita exclusivamente um link de verificação do próprio projeto Supabase."""
+    parsed = urlparse(link.strip())
+    base = urlparse(supabase_url)
+    if parsed.scheme != 'https' or parsed.netloc != base.netloc:
+        raise ValueError('O link não pertence ao Supabase configurado para a MAHUT.')
+    if parsed.path.rstrip('/') != '/auth/v1/verify':
+        raise ValueError('Copie o endereço original do botão do e-mail, antes de abri-lo.')
+    q = parse_qs(parsed.query)
+    tipo = q.get('type', [''])[0]
+    token = q.get('token', [''])[0] or q.get('token_hash', [''])[0]
+    if tipo not in ('recovery', 'invite', 'signup') or not token:
+        raise ValueError('O link não contém um código de recuperação ou convite válido.')
+    return token, tipo
+
+
 params = st.query_params
-token_hash = params.get('token_hash')
-link_type = params.get('type')
-if token_hash and link_type in ('recovery', 'invite', 'signup') and not st.session_state.ma_recovery_token:
+hash_recebido = params.get('token_hash')
+tipo_recebido = params.get('type')
+if hash_recebido and tipo_recebido in ('recovery', 'invite', 'signup') and not st.session_state.ma_recovery_token:
     try:
-        r = auth_request('POST', 'verify', json={'token_hash': token_hash, 'type': link_type})
-        if r.ok and r.json().get('access_token'):
-            st.session_state.ma_recovery_token = r.json()['access_token']
+        resposta = auth_request('POST', 'verify', json={'token_hash': hash_recebido, 'type': tipo_recebido})
+        if resposta.ok and resposta.json().get('access_token'):
+            st.session_state.ma_recovery_token = resposta.json()['access_token']
             st.query_params.clear()
             st.rerun()
         else:
-            st.error('Link inválido ou expirado. Solicite outro link.')
+            st.error('Link inválido ou expirado. Solicite um novo e-mail.')
             st.query_params.clear()
     except requests.RequestException:
-        st.warning('Não foi possível verificar o link. Tente novamente.')
+        st.error('Não foi possível validar o link. Tente novamente.')
 
 if params.get('error') or params.get('error_description'):
-    st.error('O link de acesso foi recusado ou expirou. Solicite um novo e-mail.')
+    st.error('O link foi recusado ou expirou. Solicite outro e-mail.')
     st.query_params.clear()
 
 st.info('Ambiente de testes. Vendas e comissões reais permanecem bloqueadas até a validação do acesso individual.')
@@ -141,14 +158,20 @@ if st.session_state.ma_recovery_token:
             st.warning('Use ao menos 8 caracteres e confirme a mesma senha.')
         else:
             try:
-                r = requests.put(f'{supabase_url}/auth/v1/user', headers={**HEADERS, 'Authorization': f'Bearer {st.session_state.ma_recovery_token}'}, json={'password': nova}, timeout=15)
-                if r.ok:
+                resposta = requests.put(
+                    f'{supabase_url}/auth/v1/user',
+                    headers={**HEADERS, 'Authorization': f'Bearer {st.session_state.ma_recovery_token}'},
+                    json={'password': nova}, timeout=15,
+                )
+                if resposta.ok:
                     st.session_state.ma_recovery_token = None
-                    st.success('Senha definida! Agora entre com seu e-mail e sua senha.')
+                    st.success('Senha definida com sucesso. Entre com seu e-mail e a nova senha.')
+                    st.rerun()
                 else:
-                    st.error('Não foi possível salvar a senha. Solicite outro link.')
+                    st.error('Não foi possível salvar a senha. Solicite um novo link.')
             except requests.RequestException:
                 st.error('Falha de conexão. Tente novamente.')
+
 elif st.session_state.ma_session is None:
     aba_entrar, aba_recuperar = st.tabs(['Entrar', 'Primeiro acesso / Esqueci minha senha'])
     with aba_entrar:
@@ -161,43 +184,65 @@ elif st.session_state.ma_session is None:
                 st.warning('Informe seu e-mail e senha.')
             else:
                 try:
-                    r = auth_request('POST', 'token?grant_type=password', json={'email': email, 'password': senha})
-                    if r.ok and r.json().get('access_token'):
-                        dados = r.json()
-                        st.session_state.ma_session = {'access_token': dados['access_token'], 'email': dados.get('user', {}).get('email', email)}
+                    resposta = auth_request('POST', 'token?grant_type=password', json={'email': email, 'password': senha})
+                    if resposta.ok and resposta.json().get('access_token'):
+                        dados = resposta.json()
+                        st.session_state.ma_session = {
+                            'access_token': dados['access_token'],
+                            'email': dados.get('user', {}).get('email', email),
+                        }
                         st.rerun()
                     else:
-                        st.error('Não foi possível entrar. Confira o e-mail e a senha.')
+                        st.error('Não foi possível entrar. Confira seu e-mail e senha.')
                 except requests.RequestException:
                     st.error('Serviço indisponível. Tente novamente.')
+
     with aba_recuperar:
-        st.write('Informe o e-mail de uma conta já criada no Supabase para solicitar a recuperação de senha. O cadastro no BI, sozinho, não cria essa conta.')
+        st.write('Solicite um novo e-mail ou utilize um convite de primeiro acesso recebido da MAHUT.')
         with st.form('recuperar'):
             email_recuperar = st.text_input('E-mail cadastrado').strip()
-            enviar = st.form_submit_button('Enviar link')
+            enviar = st.form_submit_button('Enviar link de recuperação')
         if enviar:
             if not email_recuperar or '@' not in email_recuperar:
                 st.warning('Informe um e-mail válido.')
             else:
                 try:
-                    r = auth_request('POST', 'recover', params={'redirect_to': PORTAL_URL}, json={'email': email_recuperar})
-                    if r.ok:
-                        st.success('Se o e-mail estiver cadastrado, você receberá um link. Confira também o spam.')
+                    resposta = auth_request('POST', 'recover', params={'redirect_to': PORTAL_URL}, json={'email': email_recuperar})
+                    if resposta.ok:
+                        st.success('Se a conta existir, você receberá um e-mail. Confira também o spam.')
+                    elif resposta.status_code == 429:
+                        st.error('Limite temporário de envios atingido. Aguarde e tente novamente.')
                     else:
-                        if r.status_code == 429:
-                            st.error('Limite temporário de envios do Supabase atingido. Aguarde e tente novamente.')
-                        elif r.status_code in (400, 422):
-                            st.error('O Supabase recusou a solicitação. Verifique a URL de redirecionamento e as configurações de autenticação.')
-                        elif r.status_code >= 500:
-                            st.error('O serviço de e-mail/autenticação está indisponível. Confira os logs do Supabase.')
-                        else:
-                            st.error(f'Não foi possível enviar o link (código HTTP {r.status_code}). Confira os logs de autenticação no Supabase.')
+                        st.error('Não foi possível solicitar a recuperação. Consulte os registros de autenticação do Supabase.')
                 except requests.RequestException:
                     st.error('Falha de conexão. Tente novamente.')
+
+        st.markdown('#### Já recebeu o e-mail?')
+        st.write('**Não clique no botão do e-mail.** Clique nele com o botão direito e escolha **Copiar endereço do link**. Depois cole o endereço abaixo. Não compartilhe esse link com ninguém.')
+        with st.form('link_copiado'):
+            link_original = st.text_input('Cole o endereço do botão Reset password ou Accept the invite', type='password')
+            usar_link = st.form_submit_button('Validar link e definir senha', type='primary')
+        if usar_link:
+            try:
+                token, tipo = verificar_link_copiado(link_original)
+                resposta = auth_request('POST', 'verify', json={'token_hash': token, 'type': tipo})
+                if resposta.ok and resposta.json().get('access_token'):
+                    st.session_state.ma_recovery_token = resposta.json()['access_token']
+                    st.rerun()
+                else:
+                    st.error('Link inválido, já utilizado ou expirado. Solicite outro e-mail.')
+            except ValueError as exc:
+                st.warning(str(exc))
+            except requests.RequestException:
+                st.error('Não foi possível validar o link. Tente novamente.')
+
 else:
     sessao = st.session_state.ma_session
     try:
-        validacao = requests.get(f'{supabase_url}/auth/v1/user', headers={**HEADERS, 'Authorization': f"Bearer {sessao['access_token']}"}, timeout=15)
+        validacao = requests.get(
+            f'{supabase_url}/auth/v1/user',
+            headers={**HEADERS, 'Authorization': f"Bearer {sessao['access_token']}"}, timeout=15,
+        )
     except requests.RequestException:
         st.warning('Não foi possível validar a sessão. Tente novamente.')
         st.stop()
@@ -214,7 +259,10 @@ else:
 
 st.divider()
 a, b, c = st.columns(3)
-with a: st.metric('Minhas vendas', '—')
-with b: st.metric('Minhas comissões', '—')
-with c: st.metric('Saldo a receber', '—')
+with a:
+    st.metric('Minhas vendas', '—')
+with b:
+    st.metric('Minhas comissões', '—')
+with c:
+    st.metric('Saldo a receber', '—')
 st.caption('Indicadores reais serão habilitados somente após testes de isolamento de dados por influenciador.')
