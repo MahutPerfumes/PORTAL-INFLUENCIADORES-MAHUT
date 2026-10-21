@@ -1,5 +1,8 @@
 import streamlit as st
 import requests
+import psycopg2
+from decimal import Decimal, InvalidOperation
+from datetime import datetime, date
 
 st.set_page_config(page_title='Portal do Influenciador | MAHUT', page_icon='✨', layout='wide', initial_sidebar_state='collapsed')
 
@@ -54,6 +57,121 @@ if 'ma_session' not in st.session_state:
 
 def auth_request(method, endpoint, **kwargs):
     return requests.request(method, f'{supabase_url}/auth/v1/{endpoint}', headers=HEADERS, timeout=20, **kwargs)
+
+
+
+def buscar_vinculo_individual(usuario):
+    """Somente servidor: valida UID do Auth contra auth.users e cadastro privado."""
+    uri = str(st.secrets.get('supabase', {}).get('database_url', '')).strip()
+    if not uri:
+        raise RuntimeError('Falta database_url nos Secrets do Portal.')
+    uid = str(usuario.get('id') or '')
+    if not uid:
+        raise RuntimeError('Usuário sem identidade validada.')
+    with psycopg2.connect(uri, connect_timeout=10, sslmode='require') as con:
+        with con.cursor() as cur:
+            cur.execute("""SELECT p.id, p.nome, p.cupom, p.comissao_percentual, p.ativo
+                           FROM auth.users AS u
+                           JOIN mahut_private.influenciadores_bi AS p
+                             ON lower(trim(p.email)) = lower(trim(u.email))
+                           WHERE u.id = %s::uuid""", (uid,))
+            linhas = cur.fetchall()
+    if len(linhas) != 1:
+        return None
+    id_parceiro, nome, cupom, comissao, ativo = linhas[0]
+    if not ativo:
+        return None
+    return {'id': str(id_parceiro), 'nome': nome, 'cupom': str(cupom).strip().upper(),
+            'comissao': Decimal(str(comissao))}
+
+
+def moeda_br(valor):
+    return 'R$ ' + f'{valor:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+
+
+def decimal_seguro(valor):
+    try:
+        d = Decimal(str(valor))
+        return d if d.is_finite() else None
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def cupons_do_pedido(pedido):
+    encontrados = set()
+    def adicionar(v):
+        if isinstance(v, str) and v.strip():
+            encontrados.add(v.strip().upper())
+        elif isinstance(v, dict):
+            for campo in ('code', 'coupon_code', 'coupon', 'name'):
+                x = v.get(campo)
+                if isinstance(x, str) and x.strip():
+                    encontrados.add(x.strip().upper())
+    for campo in ('coupon', 'coupon_code', 'coupons', 'coupon_codes'):
+        dado = pedido.get(campo)
+        if isinstance(dado, list):
+            for item in dado:
+                adicionar(item)
+        else:
+            adicionar(dado)
+    return encontrados
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def consultar_pedidos():
+    cfg = st.secrets.get('nuvemshop', {})
+    loja, token = str(cfg.get('store_id', '')).strip(), str(cfg.get('access_token', '')).strip()
+    if not loja or not token:
+        raise RuntimeError('Faltam store_id ou access_token da Nuvemshop nos Secrets do Portal.')
+    headers = {'Authentication': f'bearer {token}', 'User-Agent': 'Portal MAHUT (contato@mahut.ind.br)'}
+    resultado = []
+    for pagina in range(1, 501):
+        resposta = requests.get(f'https://api.nuvemshop.com.br/v1/{loja}/orders',
+                                headers=headers, params={'page': pagina, 'per_page': 200}, timeout=30)
+        resposta.raise_for_status()
+        lote = resposta.json()
+        if not isinstance(lote, list):
+            raise RuntimeError('Resposta inesperada da Nuvemshop.')
+        resultado.extend(lote)
+        if len(lote) < 200:
+            return resultado
+    raise RuntimeError('Limite de paginação atingido; consulta incompleta.')
+
+
+def resultados_do_parceiro(pedidos, parceiro, inicio, fim):
+    """Isolamento por cupom validado no servidor; nunca envia pedidos brutos à interface."""
+    linhas = []
+    vistos = set()
+    for pedido in pedidos:
+        if not isinstance(pedido, dict):
+            continue
+        if str(pedido.get('payment_status') or '').lower().strip() != 'paid':
+            continue
+        if str(pedido.get('status') or '').lower().strip() in ('cancelled', 'canceled', 'cancelado'):
+            continue
+        try:
+            dia = date.fromisoformat(str(pedido.get('created_at') or '')[:10])
+        except ValueError:
+            continue
+        if not inicio <= dia <= fim:
+            continue
+        cupons = cupons_do_pedido(pedido)
+        # Não atribuir vendas com múltiplos cupons: exige conciliação administrativa.
+        if cupons != {parceiro['cupom']}:
+            continue
+        chave = str(pedido.get('id') or pedido.get('number') or '')
+        if not chave or chave in vistos:
+            continue
+        vistos.add(chave)
+        total = decimal_seguro(pedido.get('total'))
+        frete = decimal_seguro(pedido.get('shipping_cost_customer'))
+        if total is None or frete is None or total < frete:
+            continue
+        base = total - frete
+        comissao = base * parceiro['comissao'] / Decimal('100')
+        linhas.append({'Pedido': str(pedido.get('number') or chave),
+                       'Data': dia.strftime('%d/%m/%Y'), 'base': base, 'comissao': comissao})
+    return linhas
 
 st.info('Ambiente de testes. Vendas e comissões reais permanecem bloqueadas até a validação do isolamento de dados.')
 
@@ -119,15 +237,52 @@ else:
             st.session_state.ma_session = None
             st.rerun()
         st.stop()
-    st.success(f"Acesso autenticado: {usuario.get('email', 'Influenciador MAHUT')}")
-    st.warning('O vínculo ao cupom e a consulta individual de vendas ainda não foram habilitados.')
+    st.success('Acesso autenticado ao Portal MAHUT.')
     if st.button('Sair'):
         st.session_state.ma_session = None
         st.rerun()
-
-st.divider()
-a, b, c = st.columns(3)
-with a: st.metric('Minhas vendas', '—')
-with b: st.metric('Minhas comissões', '—')
-with c: st.metric('Saldo a receber', '—')
-st.caption('Indicadores reais serão habilitados somente após testes de isolamento de dados por influenciador.')
+    try:
+        parceiro = buscar_vinculo_individual(usuario)
+    except Exception:
+        st.error('Não foi possível validar seu vínculo com a MAHUT. Entre em contato com a administração.')
+        st.stop()
+    if parceiro is None:
+        st.warning('Conta sem vínculo ativo com um influenciador cadastrado. Contate a MAHUT.')
+        st.stop()
+    st.subheader(f"Olá, {parceiro['nome']}")
+    st.caption(f"Cupom: {parceiro['cupom']} · Comissão: {str(parceiro['comissao']).replace('.', ',')}%")
+    st.info('Vínculo individual identificado. Os valores reais continuam bloqueados até a homologação com duas contas diferentes.')
+    if not bool(st.secrets.get('portal', {}).get('liberar_resultados', False)):
+        st.caption('Valide que cada conta recebe apenas o seu nome e cupom. Depois, a MAHUT poderá liberar os indicadores.')
+        st.stop()
+    hoje = date.today()
+    col1, col2 = st.columns(2)
+    with col1:
+        inicio = st.date_input('De', value=hoje.replace(day=1), format='DD/MM/YYYY')
+    with col2:
+        fim = st.date_input('Até', value=hoje, format='DD/MM/YYYY')
+    if inicio > fim:
+        st.warning('A data inicial deve ser anterior à final.')
+        st.stop()
+    try:
+        linhas = resultados_do_parceiro(consultar_pedidos(), parceiro, inicio, fim)
+    except Exception:
+        st.error('Não foi possível consultar os pedidos da Nuvemshop. Confira a configuração do Portal.')
+        st.stop()
+    faturamento = sum((x['base'] for x in linhas), Decimal('0'))
+    comissao = sum((x['comissao'] for x in linhas), Decimal('0'))
+    st.divider()
+    a, b, c = st.columns(3)
+    with a: st.metric('Meus pedidos pagos', len(linhas))
+    with b: st.metric('Faturamento atribuído', moeda_br(faturamento))
+    with c: st.metric('Comissão estimada', moeda_br(comissao))
+    st.caption('Comissão estimada sobre mercadorias após descontos, sem frete. Saldo a receber depende de conciliação financeira e não é exibido.')
+    if linhas:
+        st.subheader('Meus pedidos')
+        st.dataframe([{'Pedido': x['Pedido'], 'Data': x['Data'],
+                       'Faturamento atribuído': moeda_br(x['base']),
+                       'Comissão estimada': moeda_br(x['comissao'])} for x in linhas],
+                     hide_index=True, use_container_width=True)
+    else:
+        st.info('Nenhum pedido pago atribuído ao seu cupom no período selecionado.')
+    st.caption('Nenhum nome, endereço, telefone ou e-mail de cliente é exibido.')
