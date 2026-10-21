@@ -3,14 +3,81 @@ import requests
 
 st.set_page_config(page_title='Portal do Influenciador | MAHUT', page_icon='✨', layout='wide')
 st.markdown('''<style>
-.stApp {background:#f8f6f2;color:#24201b}
-[data-testid="stHeader"] {background:#f8f6f2}
-h1,h2,h3 {color:#272019}
-.ma-header {background:linear-gradient(110deg,#161411,#34291c);padding:32px;border-radius:16px;color:#f4e5c4;margin-bottom:24px}
-.ma-logo {font-family:Georgia,serif;font-size:38px;letter-spacing:7px;color:#c7a36a}
-.ma-small {color:#d5c5ac;letter-spacing:2px;font-size:11px}
-.ma-title {font-size:30px;font-weight:600;color:#fff!important;margin-top:24px}
-.ma-subtitle {color:#f4e5c4}
+:root { color-scheme: light; }
+html, body, [data-testid="stAppViewContainer"], .stApp {
+  background-color: #f8f6f2 !important;
+  color: #24201b !important;
+}
+[data-testid="stHeader"] { background-color: #f8f6f2 !important; }
+[data-testid="stMainBlockContainer"] { max-width: 1080px; padding-top: 2rem; }
+[data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li, .stApp h1, .stApp h2, .stApp h3,
+[data-testid="stWidgetLabel"] p, [data-testid="stCaptionContainer"] p,
+[data-testid="stMetricLabel"] p, [data-testid="stMetricValue"] {
+  color: #24201b !important;
+}
+/* Explicit form colors so light/dark device settings cannot hide input text. */
+.stApp [data-testid="stTextInput"] input,
+.stApp [data-testid="stTextInput"] input:focus {
+  background-color: #fff !important;
+  color: #1f1b17 !important;
+  -webkit-text-fill-color: #1f1b17 !important;
+  caret-color: #1f1b17 !important;
+}
+.stApp [data-testid="stTextInput"] input::placeholder {
+  color: #625b53 !important;
+  -webkit-text-fill-color: #625b53 !important;
+  opacity: 1 !important;
+}
+.stApp [data-testid="stTextInput"] [data-baseweb="input"],
+.stApp [data-testid="stTextInput"] [data-baseweb="base-input"] {
+  background: #fff !important;
+  border-radius: 8px !important;
+}
+.stApp [data-testid="stTextInput"] [data-baseweb="input"] {
+  border: 1px solid #8d8173 !important;
+}
+.stApp [data-testid="stTextInput"] button,
+.stApp [data-testid="stTextInput"] svg { color: #34302a !important; fill: none; }
+.stApp [data-testid="stForm"] {
+  background: #fffdf9 !important;
+  border: 1px solid #ded5c9 !important;
+  border-radius: 12px !important;
+  padding: 1.2rem !important;
+}
+.stApp [data-testid="stTabs"] [role="tab"] { color: #3d352b !important; }
+.stApp [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+  color: #6b4c20 !important;
+  font-weight: 700 !important;
+}
+.stApp [data-testid="stButton"] button[kind="primary"],
+.stApp [data-testid="stFormSubmitButton"] button[kind="primary"] {
+  background: #49351c !important; color: #fff !important;
+  border: 1px solid #49351c !important;
+}
+.stApp [data-testid="stButton"] button[kind="primary"] p,
+.stApp [data-testid="stFormSubmitButton"] button[kind="primary"] p {
+  color: #fff !important;
+}
+.stApp [data-testid="stButton"] button:not([kind="primary"]),
+.stApp [data-testid="stFormSubmitButton"] button:not([kind="primary"]) {
+  background: #fff !important; color: #24201b !important;
+  border: 1px solid #8d8173 !important;
+}
+.ma-header {
+  background: linear-gradient(110deg,#161411,#34291c);
+  padding: clamp(22px, 4vw, 34px); border-radius: 16px;
+  margin-bottom: 24px;
+}
+.ma-logo {font-family: Georgia,serif;font-size:clamp(28px,5vw,38px);letter-spacing:6px;color:#e4c18a!important}
+.ma-small {color:#e3d0b4!important;letter-spacing:2px;font-size:11px}
+.ma-title {font-size:clamp(21px,4vw,30px);font-weight:600;color:#fff!important;margin-top:20px}
+.ma-subtitle {color:#f4e5c4!important}
+@media(max-width:640px) {
+  [data-testid="stMainBlockContainer"] {padding-left: 1rem; padding-right: 1rem;}
+  .ma-header {border-radius: 12px;}
+  .ma-logo {letter-spacing:4px;}
+}
 </style>''', unsafe_allow_html=True)
 st.markdown('''<div class="ma-header"><div class="ma-logo">MAHUT</div>
 <div class="ma-small">PERFUMES · PORTAL DO INFLUENCIADOR</div>
