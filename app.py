@@ -3,6 +3,7 @@ import requests
 import psycopg2
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, date
+from urllib.parse import urlparse, parse_qs
 
 st.set_page_config(page_title='Portal do Influenciador | MAHUT', page_icon='✨', layout='wide', initial_sidebar_state='collapsed')
 
@@ -60,10 +61,9 @@ if 'ma_session' not in st.session_state:
     st.session_state.ma_session = None
 if 'ma_recovery_step' not in st.session_state:
     st.session_state.ma_recovery_step = 'login'
-if 'ma_recovery_email' not in st.session_state:
-    st.session_state.ma_recovery_email = ''
 if 'ma_recovery_token' not in st.session_state:
     st.session_state.ma_recovery_token = None
+
 
 def auth_request(method, endpoint, **kwargs):
     return requests.request(method, f'{supabase_url}/auth/v1/{endpoint}', headers=HEADERS, timeout=20, **kwargs)
@@ -185,20 +185,34 @@ def resultados_do_parceiro(pedidos, parceiro, inicio, fim):
 
 st.info('Ambiente de testes. Vendas e comissões reais permanecem bloqueadas até a validação do isolamento de dados.')
 
+def validar_link_recuperacao(link):
+    """Valida a URL original do e-mail, sem seguir o link no navegador."""
+    parsed = urlparse(link.strip())
+    base = urlparse(supabase_url)
+    if parsed.scheme != 'https' or parsed.netloc != base.netloc or parsed.path != '/auth/v1/verify':
+        raise ValueError('Link não pertence ao serviço de autenticação configurado.')
+    args = parse_qs(parsed.query)
+    if args.get('type', [''])[0] != 'recovery':
+        raise ValueError('Este não é um link de recuperação de senha.')
+    token_hash = args.get('token', [''])[0] or args.get('token_hash', [''])[0]
+    if not token_hash:
+        raise ValueError('Link incompleto. Solicite outro e-mail de recuperação.')
+    return token_hash
+
+
 if st.session_state.ma_session is None and st.session_state.ma_recovery_step == 'request':
     st.subheader('Recuperar acesso ao Portal')
-    st.write('Informe seu e-mail cadastrado para receber um código de recuperação.')
+    st.write('Informe seu e-mail para receber um link seguro de recuperação.')
     with st.form('ma_pedir_recuperacao'):
         email_rec = st.text_input('E-mail cadastrado').strip().lower()
-        enviar_rec = st.form_submit_button('Enviar código', type='primary')
+        enviar_rec = st.form_submit_button('Enviar link', type='primary')
     if enviar_rec:
         if not email_rec or '@' not in email_rec:
             st.warning('Informe um e-mail válido.')
         else:
             try:
-                r = auth_request('POST', 'recover', json={'email': email_rec})
+                r = auth_request('POST', 'recover', json={'email': email_rec, 'redirect_to': PORTAL_URL})
                 if r.ok:
-                    st.session_state.ma_recovery_email = email_rec
                     st.session_state.ma_recovery_step = 'verify'
                     st.rerun()
                 elif r.status_code == 429:
@@ -213,29 +227,27 @@ if st.session_state.ma_session is None and st.session_state.ma_recovery_step == 
     st.stop()
 
 if st.session_state.ma_session is None and st.session_state.ma_recovery_step == 'verify':
-    st.subheader('Confirmar código de recuperação')
-    st.caption('Confira o e-mail cadastrado. O código tem validade limitada.')
-    with st.form('ma_verificar_codigo'):
-        codigo = st.text_input('Código recebido por e-mail').strip()
-        verificar = st.form_submit_button('Validar código', type='primary')
+    st.subheader('Confirmar recuperação de senha')
+    st.info('Enviamos um e-mail, caso o endereço esteja cadastrado. Para concluir com segurança nesta versão, copie o endereço do botão "Reset password" do e-mail (sem clicar nele) e cole abaixo. Não compartilhe o link com ninguém.')
+    with st.form('ma_verificar_link'):
+        link = st.text_input('Link de recuperação recebido por e-mail', type='password')
+        verificar = st.form_submit_button('Validar link', type='primary')
     if verificar:
-        if not codigo:
-            st.warning('Informe o código recebido.')
-        else:
-            try:
-                r = auth_request('POST', 'verify', json={
-                    'email': st.session_state.ma_recovery_email,
-                    'token': codigo, 'type': 'recovery'})
-                dados = r.json() if r.ok else {}
-                if r.ok and dados.get('access_token'):
-                    st.session_state.ma_recovery_token = dados['access_token']
-                    st.session_state.ma_recovery_step = 'new_password'
-                    st.rerun()
-                else:
-                    st.error('Código inválido ou expirado. Solicite outro código.')
-            except (requests.RequestException, ValueError):
-                st.error('Não foi possível validar o código. Tente novamente.')
-    if st.button('Solicitar outro código', key='ma_reenviar'):
+        try:
+            token_hash = validar_link_recuperacao(link)
+            r = auth_request('POST', 'verify', json={'token_hash': token_hash, 'type': 'recovery'})
+            dados = r.json() if r.ok else {}
+            if r.ok and dados.get('access_token'):
+                st.session_state.ma_recovery_token = dados['access_token']
+                st.session_state.ma_recovery_step = 'new_password'
+                st.rerun()
+            else:
+                st.error('Link inválido, expirado ou já utilizado. Solicite outro.')
+        except ValueError as e:
+            st.error(str(e))
+        except requests.RequestException:
+            st.error('Falha de conexão. Tente novamente.')
+    if st.button('Solicitar outro link', key='ma_reenviar'):
         st.session_state.ma_recovery_step = 'request'
         st.rerun()
     st.stop()
@@ -245,12 +257,12 @@ if st.session_state.ma_session is None and st.session_state.ma_recovery_step == 
     with st.form('ma_nova_senha_recuperacao'):
         nova_rec = st.text_input('Nova senha (mínimo de 12 caracteres)', type='password')
         confirmar_rec = st.text_input('Confirme a nova senha', type='password')
-        salvar_rec = st.form_submit_button('Salvar nova senha', type='primary')
+        salvar_rec = st.form_submit_button('Salvar senha e entrar', type='primary')
     if salvar_rec:
         if len(nova_rec) < 12 or nova_rec != confirmar_rec:
             st.warning('Use ao menos 12 caracteres e confirme a mesma senha.')
         elif not st.session_state.ma_recovery_token:
-            st.error('A validação expirou. Solicite um novo código.')
+            st.error('A validação expirou. Solicite um novo link.')
         else:
             try:
                 token = st.session_state.ma_recovery_token
@@ -258,12 +270,12 @@ if st.session_state.ma_session is None and st.session_state.ma_recovery_step == 
                     headers={**HEADERS, 'Authorization': f'Bearer {token}'},
                     json={'password': nova_rec, 'data': {'ma_primeiro_acesso': False}}, timeout=20)
                 if r.ok:
+                    st.session_state.ma_session = {'access_token': token}
                     st.session_state.ma_recovery_token = None
-                    st.session_state.ma_recovery_email = ''
                     st.session_state.ma_recovery_step = 'login'
-                    st.success('Senha alterada. Entre com a nova senha.')
+                    st.rerun()
                 else:
-                    st.error('Não foi possível alterar a senha. Solicite um novo código.')
+                    st.error('Não foi possível alterar a senha. Solicite um novo link.')
             except requests.RequestException:
                 st.error('Falha de conexão. Tente novamente.')
     st.stop()
