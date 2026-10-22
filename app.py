@@ -25,7 +25,11 @@ html, body, [data-testid="stAppViewContainer"], .stApp {background:#f8f6f2!impor
 [data-testid="stForm"] {background:#fff!important;border:1px solid #e2d9cb!important;border-radius:12px!important;padding:18px!important}
 [data-testid="stForm"] label,[data-testid="stWidgetLabel"] p {color:#24201b!important;font-weight:600!important}
 .stButton button[kind="primary"], [data-testid="stFormSubmitButton"] button[kind="primary"] {background:#30251a!important;color:#fff!important;border:1px solid #30251a!important}
-.stButton button,[data-testid="stFormSubmitButton"] button {border-radius:8px!important;min-height:40px!important}
+.stButton button,[data-testid="stFormSubmitButton"] button {border-radius:8px!important;min-height:40px!important;background:#30251a!important;color:#ffffff!important;border:1px solid #30251a!important}
+.stButton button p,.stButton button span,[data-testid="stFormSubmitButton"] button p,[data-testid="stFormSubmitButton"] button span {color:#ffffff!important;-webkit-text-fill-color:#ffffff!important}
+.stButton button:hover,[data-testid="stFormSubmitButton"] button:hover {background:#4a3826!important;border-color:#c7a36a!important;color:#ffffff!important}
+.stButton button:hover p,.stButton button:hover span,[data-testid="stFormSubmitButton"] button:hover p,[data-testid="stFormSubmitButton"] button:hover span {color:#ffffff!important;-webkit-text-fill-color:#ffffff!important}
+.stButton button:focus-visible,[data-testid="stFormSubmitButton"] button:focus-visible {outline:3px solid #c7a36a!important;outline-offset:2px!important}
 [data-baseweb="tab-list"] {gap:8px;flex-wrap:wrap}
 button[data-baseweb="tab"] {background:#eee7dc!important;border-radius:8px!important}
 button[data-baseweb="tab"] p {color:#30251a!important}
