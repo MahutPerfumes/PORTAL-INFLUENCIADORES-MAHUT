@@ -127,10 +127,10 @@ button[data-baseweb="tab"][aria-selected="true"] {background:#e2cba5!important}
 
 
 /* Cabeçalho mobile definitivo: logomarca oficial recortada do banner original. */
-.ma-mobile-logo-only{display:block;width:210px;max-width:75%;height:auto;object-fit:contain;margin:0 auto}
+.ma-mobile-logo-only{display:block;width:140px;max-width:55%;height:auto;max-height:108px;object-fit:contain;margin:0 auto}
 @media(max-width:650px){
- .ma-mobile-header{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;padding:20px 14px 22px}
- .ma-mobile-logo-only{width:190px;max-width:75%;height:auto;margin:0 auto}
+ .ma-mobile-header{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:9px;padding:18px 14px 20px}
+ .ma-mobile-logo-only{width:140px;max-width:55%;height:auto;max-height:108px;object-fit:contain;margin:0 auto}
  .ma-mobile-title{display:block!important;max-width:100%;margin:2px auto 0!important;text-align:center;font-size:clamp(18px,5.6vw,22px)!important;line-height:1.25}
  .ma-mobile-quote{display:block;max-width:280px;margin:0 auto;text-align:center;font-size:12px;line-height:1.45}
 }
